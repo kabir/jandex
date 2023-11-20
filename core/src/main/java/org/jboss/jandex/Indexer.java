@@ -247,6 +247,14 @@ public final class Indexer {
     private final static int HAS_RUNTIME_INVISIBLE_PARAM_ANNOTATION = 17;
     private final static int HAS_RUNTIME_INVISIBLE_TYPE_ANNOTATION = 18;
 
+    public Indexer() {
+        this(null);
+    }
+
+    public Indexer(AdditionalScanInfoHook additionalHook) {
+        this.additionalHook = additionalHook != null ? additionalHook : AdditionalScanInfoHook.NULL;
+    }
+
     private static class InnerClassInfo {
         private InnerClassInfo(DotName innerClass, DotName enclosingClass, String simpleName, int flags) {
             this.innerClass = innerClass;
@@ -411,6 +419,8 @@ public final class Indexer {
     private NameTable names;
     private GenericSignatureParser signatureParser;
     private final TmpObjects tmpObjects = new TmpObjects();
+
+    private final AdditionalScanInfoHook additionalHook;
 
     private void initIndexMaps() {
         if (masterAnnotations == null)
@@ -2030,6 +2040,8 @@ public final class Indexer {
 
         this.currentClass = new ClassInfo(thisName, superClassType, flags, interfaceTypes);
 
+        additionalHook.addClassInfo(thisName, superClassType, flags, interfaceTypes);
+
         if (superName != null)
             addSubclass(superName, currentClass);
 
@@ -2328,6 +2340,9 @@ public final class Indexer {
                     buf[offset++] = (byte) tag;
                     stream.readFully(buf, offset, 2);
                     offset += 2;
+                    if (additionalHook.shouldHandleClassPoolTag(tag)) {
+                        additionalHook.handleConstantPoolEntry(pos, tag, buf);
+                    }
                     break;
                 case CONSTANT_FIELDREF:
                 case CONSTANT_METHODREF:
@@ -2341,6 +2356,9 @@ public final class Indexer {
                     buf[offset++] = (byte) tag;
                     stream.readFully(buf, offset, 4);
                     offset += 4;
+                    if (additionalHook.shouldHandleClassPoolTag(tag)) {
+                        additionalHook.handleConstantPoolEntry(pos, tag, buf);
+                    }
                     break;
                 case CONSTANT_LONG:
                 case CONSTANT_DOUBLE:
@@ -2349,12 +2367,19 @@ public final class Indexer {
                     stream.readFully(buf, offset, 8);
                     offset += 8;
                     pos++; // 8 byte constant pool entries take two "virtual" slots for some reason
+                    if (additionalHook.shouldHandleClassPoolTag(tag)) {
+                        // I don't really need this but others might?
+                        additionalHook.handleConstantPoolEntry(pos, tag, buf);
+                    }
                     break;
                 case CONSTANT_METHODHANDLE:
                     buf = sizeToFit(buf, 4, offset, size - pos);
                     buf[offset++] = (byte) tag;
                     stream.readFully(buf, offset, 3);
                     offset += 3;
+                    if (additionalHook.shouldHandleClassPoolTag(tag)) {
+                        additionalHook.handleConstantPoolEntry(pos, tag, buf);
+                    }
                     break;
                 case CONSTANT_UTF8:
                     int len = stream.readUnsignedShort();
@@ -2364,6 +2389,12 @@ public final class Indexer {
                     buf[offset++] = (byte) len;
 
                     stream.readFully(buf, offset, len);
+
+                    if (additionalHook.shouldHandleClassPoolTag(tag)) {
+                        // I don't really need this but others might?
+                        additionalHook.handleConstantPoolEntry(pos, tag, buf);
+                    }
+
                     if (len == RUNTIME_ANNOTATIONS_LEN && match(buf, offset, RUNTIME_ANNOTATIONS)) {
                         annoAttributes[pos] = HAS_RUNTIME_ANNOTATION;
                         hasAnnotations = true;
@@ -2492,6 +2523,7 @@ public final class Indexer {
             initIndexMaps();
             initClassFields();
 
+            additionalHook.startClass();
             processConstantPool(data);
             processClassInfo(data);
             processFieldInfo(data);
@@ -2514,6 +2546,8 @@ public final class Indexer {
                 }
                 currentClass.module().setMainClass(moduleMainClass);
             }
+
+            additionalHook.endClass();
 
             return new ClassSummary(currentClass.name(), currentClass.superName(), currentClass.annotationsMap().keySet());
         } finally {

@@ -154,7 +154,7 @@ public final class Index implements IndexView {
      * @return the index
      */
     public static Index of(Iterable<Class<?>> classes) throws IOException {
-        Indexer indexer = new Indexer();
+        Indexer indexer = new Indexer(null);
 
         for (Class<?> clazz : classes) {
             indexer.indexClass(clazz);
